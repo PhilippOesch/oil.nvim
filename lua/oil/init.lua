@@ -301,6 +301,13 @@ M.open_float = function(dir)
         if vim.api.nvim_win_is_valid(winid) then
           vim.api.nvim_win_close(winid, true)
         end
+        if util.is_floating_win(winid) then
+          local preview_win = util.get_preview_win()
+          if preview_win ~= nil then
+            vim.api.nvim_win_close(preview_win, true)
+          end
+        end
+
         for _, id in ipairs(autocmds) do
           vim.api.nvim_del_autocmd(id)
         end
@@ -375,9 +382,9 @@ local function update_preview_window(oil_bufnr)
     local cursor_entry = M.get_cursor_entry()
     local preview_win_id = util.get_preview_win()
     if
-      cursor_entry
-      and preview_win_id
-      and cursor_entry.id ~= vim.w[preview_win_id].oil_entry_id
+        cursor_entry
+        and preview_win_id
+        and cursor_entry.id ~= vim.w[preview_win_id].oil_entry_id
     then
       M.open_preview()
     end
@@ -444,6 +451,7 @@ end
 ---    horizontal boolean Open the buffer in a horizontal split
 ---    split "aboveleft"|"belowright"|"topleft"|"botright" Split modifier
 M.open_preview = function(opts, callback)
+  print('called')
   opts = opts or {}
   local util = require("oil.util")
 
@@ -466,18 +474,64 @@ M.open_preview = function(opts, callback)
       opts.split = vim.o.splitright and "belowright" or "aboveleft"
     end
   end
-  if util.is_floating_win() then
-    return finish("oil preview doesn't work in a floating window")
-  end
+  -- if util.is_floating_win() then
+  -- local oilconfig = require("oil.config")
+  -- local config = vim.api.nvim_win_get_config(0)
+  -- local newWidth = math.floor(config.width / 2)
+  -- print(vim.inspect(config))
+  --
+  -- vim.api.nvim_win_set_width(0, config.width)
+  -- local win_opts = {
+  --   relative = "editor",
+  --   width = newWidth,
+  --   height = config.height,
+  --   row = config.row,
+  --   col = config.col + config.width,
+  --   border = oilconfig.float.border,
+  --   zindex = 45,
+  -- }
+  -- local bufnr = vim.api.nvim_get_current_buf()
+  -- local preview_win_id = vim.api.nvim_open_win(bufnr, true, win_opts)
+  -- local preview_win = util.get_preview_win()
+  -- print(vim.inspect(preview_win))
+
+  -- return finish()
+  -- end
+
+  local is_floating_window = util.is_floating_win()
 
   local entry = M.get_cursor_entry()
   if not entry then
     return finish("Could not find entry under cursor")
   end
 
-  local preview_win = util.get_preview_win()
   local prev_win = vim.api.nvim_get_current_win()
+  local preview_win = util.get_preview_win()
+
   local bufnr = vim.api.nvim_get_current_buf()
+
+  if is_floating_window then
+    if preview_win == nil then
+      local oilconfig = require("oil.config")
+      local config = vim.api.nvim_win_get_config(0)
+      local newWidth = math.floor(config.width / 2)
+
+      vim.api.nvim_win_set_width(0, newWidth)
+      local win_opts = {
+        relative = "editor",
+        width = newWidth,
+        height = config.height,
+        row = config.row,
+        col = newWidth + config.col,
+        border = oilconfig.float.border,
+        zindex = 45,
+      }
+      -- local test = vim.b.oil_preview_buffer
+      preview_win = vim.api.nvim_open_win(bufnr, false, win_opts)
+      vim.wo[preview_win].previewwindow = true
+    end
+  end
+
 
   local cmd = preview_win and "buffer" or "sbuffer"
   local mods = {
@@ -495,37 +549,43 @@ M.open_preview = function(opts, callback)
     vim.cmd.wincmd({ args = { "w" }, count = winnr })
   end
 
-  if preview_win then
-    if is_visual_mode then
-      hack_set_win(preview_win)
-    else
-      vim.api.nvim_set_current_win(preview_win)
+
+  if is_floating_window then
+    if preview_win then
+      if is_visual_mode then
+        hack_set_win(prev_win)
+      else
+        vim.api.nvim_set_current_win(prev_win)
+      end
+    end
+  else
+    if preview_win then
+      if is_visual_mode then
+        hack_set_win(preview_win)
+      else
+        vim.api.nvim_set_current_win(preview_win)
+      end
     end
   end
 
   util.get_edit_path(bufnr, entry, function(normalized_url)
     local filebufnr = vim.fn.bufadd(normalized_url)
     local entry_is_file = not vim.endswith(normalized_url, "/")
-
-    -- If we're previewing a file that hasn't been opened yet, make sure it gets deleted after
-    -- we close the window
+    --
+    -- -- If we're previewing a file that hasn't been opened yet, make sure it gets deleted after
+    -- -- we close the window
     if entry_is_file and vim.fn.bufloaded(filebufnr) == 0 then
       vim.bo[filebufnr].bufhidden = "wipe"
       vim.b[filebufnr].oil_preview_buffer = true
     end
-
-    ---@diagnostic disable-next-line: param-type-mismatch
-    local ok, err = pcall(vim.cmd, {
-      cmd = cmd,
-      args = { filebufnr },
-      mods = mods,
-    })
+    vim.api.nvim_win_set_buf(preview_win, filebufnr)
+    --
     -- Ignore swapfile errors
     if not ok and err and not err:match("^Vim:E325:") then
       vim.api.nvim_echo({ { err, "Error" } }, true, {})
     end
 
-    vim.api.nvim_set_option_value("previewwindow", true, { scope = "local", win = 0 })
+    vim.api.nvim_set_option_value("previewwindow", true, { scope = "local", win = preview_win })
     vim.w.oil_entry_id = entry.id
     vim.w.oil_source_win = prev_win
     if is_visual_mode then
@@ -710,9 +770,9 @@ M.select = function(opts, callback)
       return finish(err)
     end
     if
-      opts.close
-      and vim.api.nvim_win_is_valid(prev_win)
-      and prev_win ~= vim.api.nvim_get_current_win()
+        opts.close
+        and vim.api.nvim_win_is_valid(prev_win)
+        and prev_win ~= vim.api.nvim_get_current_win()
     then
       vim.api.nvim_win_call(prev_win, function()
         M.close()
@@ -887,7 +947,7 @@ local function restore_alt_buf()
         -- If we are editing the same buffer that we started oil from, set the alternate to be
         -- what it was before we opened oil
         local has_orig_alt, alt_buffer =
-          pcall(vim.api.nvim_win_get_var, 0, "oil_original_alternate")
+            pcall(vim.api.nvim_win_get_var, 0, "oil_original_alternate")
         if has_orig_alt and vim.api.nvim_buf_is_valid(alt_buffer) then
           vim.fn.setreg("#", alt_buffer)
         end
@@ -1098,11 +1158,11 @@ M.setup = function(opts)
       local winid = vim.api.nvim_get_current_win()
       -- If the user issued a :wq or similar, we should quit after saving
       local quit_after_save = vim.endswith(last_keys, ":wq\r")
-        or vim.endswith(last_keys, ":x\r")
-        or vim.endswith(last_keys, "ZZ")
+          or vim.endswith(last_keys, ":x\r")
+          or vim.endswith(last_keys, "ZZ")
       local quit_all = vim.endswith(last_keys, ":wqa\r")
-        or vim.endswith(last_keys, ":wqal\r")
-        or vim.endswith(last_keys, ":wqall\r")
+          or vim.endswith(last_keys, ":wqal\r")
+          or vim.endswith(last_keys, ":wqall\r")
       local bufname = vim.api.nvim_buf_get_name(params.buf)
       if vim.endswith(bufname, "/") then
         vim.cmd.doautocmd({ args = { "BufWritePre", params.file }, mods = { silent = true } })
