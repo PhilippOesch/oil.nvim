@@ -242,6 +242,25 @@ local function get_first_mutable_column_col(adapter, ranges)
   return min_col
 end
 
+---Return the highlight of the entry
+---@param entry oil.InternalEntry
+---@return string
+local function get_entry_highlight(entry)
+  local entry_type = entry[FIELD_TYPE]
+
+  if entry_type == "socket" then
+    return "OilSocket"
+  elseif config.view_options.is_hidden_file(entry[FIELD_NAME]) then
+    return "OilHidden"
+  elseif entry_type == "dir" then
+    return "OilDir"
+  elseif entry_type == "link" then
+    return "OilLink"
+  else
+    return "OilFile"
+  end
+end
+
 ---Force cursor to be after hidden/immutable columns
 local function constrain_cursor()
   if not config.constrain_cursor then
@@ -691,12 +710,11 @@ M.format_entry_cols = function(entry, column_defs, col_width, adapter)
     col_width[i + 1] = math.max(col_width[i + 1], vim.api.nvim_strwidth(text))
     table.insert(cols, chunk)
   end
+  local highlight = get_entry_highlight(entry)
   -- Always add the entry name at the end
   local entry_type = entry[FIELD_TYPE]
   if entry_type == "directory" then
-    table.insert(cols, { name .. "/", "OilDir" })
-  elseif entry_type == "socket" then
-    table.insert(cols, { name, "OilSocket" })
+    table.insert(cols, { name .. "/", highlight })
   elseif entry_type == "link" then
     local link_text
     if meta then
@@ -712,12 +730,12 @@ M.format_entry_cols = function(entry, column_defs, col_width, adapter)
       end
     end
 
-    table.insert(cols, { name, "OilLink" })
+    table.insert(cols, { name, highlight })
     if link_text then
       table.insert(cols, { link_text, "OilLinkTarget" })
     end
   else
-    table.insert(cols, { name, "OilFile" })
+    table.insert(cols, { name, highlight })
   end
   return cols
 end
