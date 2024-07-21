@@ -780,6 +780,11 @@ end
 M._get_highlights = function()
   return {
     {
+      name = "OilHidden",
+      link = "Comment",
+      desc = "Hidden entries in an oil buffer",
+    },
+    {
       name = "OilDir",
       link = "Directory",
       desc = "Directory names in an oil buffer",
